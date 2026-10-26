@@ -1,4 +1,3 @@
-
 from collections import Counter
 from pathlib import PurePosixPath
 
@@ -41,6 +40,7 @@ def analyze_repository(files: list[dict]) -> dict:
     important_files = []
     source_files = []
     readme = None
+    readme_depth = None  # folder depth of the README chosen so far
 
     for file in files:
         path = file["path"]
@@ -54,8 +54,13 @@ def analyze_repository(files: list[dict]) -> dict:
 
         file_tree.append(path)
 
+        # Use the README closest to the repository root. Without this, a README
+        # in a sub-folder (e.g. src/flask/sansio/README.md) replaced the main one.
         if filename.lower() == "readme.md":
-            readme = content
+            depth = len(pure_path.parts)
+            if readme_depth is None or depth < readme_depth:
+                readme = content
+                readme_depth = depth
 
         if filename in {
             "pyproject.toml",
