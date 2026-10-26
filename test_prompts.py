@@ -193,3 +193,32 @@ def test_verifier_keeps_valid_finding_and_counts_warnings(report):
     output = flag_unverified_findings(review, report)
     assert "Finding 1" in output
     assert count_unverified_findings(output) >= 1
+
+
+def test_function_signature_is_not_accepted_as_bug_evidence():
+    report = {
+        "source_files": [
+            {
+                "path": "src/example.py",
+                "content": (
+                    "def to_native_string(string: str) -> str:\n"
+                    "    return string\n"
+                ),
+            }
+        ],
+        "important_files": [],
+        "readme": "",
+        "file_tree": ["src/example.py"],
+    }
+
+    review = """### Finding 1: Missing error handling
+- File: src/example.py
+- Evidence: `def to_native_string(string: str) -> str:`
+- Problem: This function does not handle invalid input.
+- Confidence: Medium
+"""
+
+    result = flag_unverified_findings(review, report, drop_failed=True)
+
+    assert "No verified issues found" in result
+    assert "function signature" in result

@@ -407,30 +407,61 @@ _HEDGE_RE = re.compile(r"\b(may|might|could potentially|potentially|possibly)\b"
 _IMPORT_RE = re.compile(r"^(import\s+\S|from\s+\S+\s+import\s)")
 
 
+
 def _check_finding(block: str, corpus: str, known_paths: set) -> tuple[list, list]:
     """Return (hard_problems, soft_problems) for one finding.
-    Hard = the finding cannot be trusted. Soft = worded like a guess."""
+
+    Hard = the finding cannot be trusted.
+    Soft = worded like a guess.
+    """
     hard, soft = [], []
+
     match = _EVIDENCE_RE.search(block)
     quote = _norm(match.group(1)).strip("` ") if match else ""
+
     if not quote:
         hard.append("no evidence line was given")
     else:
         if len(quote) >= 6 and quote not in corpus:
-            hard.append("the evidence line is not in the repository files (invented)")
+            hard.append(
+                "the evidence line is not in the repository files (invented)"
+            )
+
         if _IMPORT_RE.match(quote):
-            hard.append("the evidence is only an import line, which does not show a bug")
+            hard.append(
+                "the evidence is only an import line, which does not show a bug"
+            )
+
+        # Reject evidence that consists only of a function signature.
+        if re.match(
+            r"^(async\s+)?def\s+\w+\s*\(.*\)\s*(?:->\s*[^:]+)?\s*:$",
+            quote,
+        ):
+            hard.append(
+                "the evidence is only a function signature, "
+                "which does not demonstrate a bug"
+            )
+
     file_match = _FILE_RE.search(block)
-    cited = file_match.group(1).strip().strip("`* ").lower() if file_match else ""
+    cited = (
+        file_match.group(1).strip().strip("`* ").lower()
+        if file_match
+        else ""
+    )
+
     if known_paths and cited and cited not in known_paths:
         hard.append(f"the file `{cited}` does not exist in this repository")
+
     title = _TITLE_RE.search(block)
     if title and _OFF_TOPIC_RE.search(title.group(1)):
         hard.append("it is a style/documentation remark, not a bug")
+
     problem = _PROBLEM_RE.search(block)
     if problem and _HEDGE_RE.search(problem.group(1)):
         soft.append("the problem is described as a guess, not a confirmed failure")
+
     return hard, soft
+
 
 
 def flag_unverified_findings(review: str, report: dict, drop_failed: bool = False) -> str:
