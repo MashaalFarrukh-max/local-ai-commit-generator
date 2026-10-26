@@ -1,14 +1,87 @@
+"""AI review for RepoLens AI, powered by a local Ollama model.
+
+The app calls generate_repository_review(). It makes TWO model calls (summary
+and code review) using focused prompts from commit/prompts.py. The README
+checklist and its improvement suggestions are produced by plain code, which is
+instant and cannot contradict itself. Code-review findings are checked against
+the real files and flagged when they look invented.
+"""
 
 from openai import OpenAI
+
+from commit.prompts import (
+    MAX_OUTPUT_TOKENS,
+    build_code_review_messages,
+    build_summary_messages,
+    flag_unverified_findings,
+    limits_markdown,
+    readme_checklist_markdown,
+    readme_improvements_markdown,
+)
+
+MODEL = "llama3.2:3b"
 
 client = OpenAI(
     base_url="http://localhost:11434/v1",
     api_key="ollama",
+    timeout=600,
 )
 
 
-def generate_repository_review(report: dict) -> str:
-    """Generate an AI summary and code review using local Ollama."""
+def _ask(messages: list[dict], max_tokens: int, model: str = MODEL) -> str:
+    response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=0.2,
+        max_tokens=max_tokens,  # shorter answers = much faster on a CPU
+    )
+    return response.choices[0].message.content or (
+        "The AI model returned an empty response."
+    )
+
+
+def documentation_section(report: dict) -> str:
+    """Instant, code-generated README review (no model call)."""
+    return readme_checklist_markdown(report) + "\n\n" + readme_improvements_markdown(report)
+
+
+def generate_repository_review(report: dict, model: str = MODEL, on_progress=None) -> str:
+    """Return one markdown report.
+
+    on_progress(markdown_so_far) is called after every finished section, so the
+    app can show results while the next section is still being written.
+    """
+    parts: list[str] = []
+
+    def publish(title: str, body: str) -> None:
+        parts.append(f"# {title}\n\n{body}")
+        if on_progress:
+            on_progress("\n\n---\n\n".join(parts))
+
+    # Instant section first, so the user sees something right away.
+    publish("Documentation Review", documentation_section(report))
+
+    summary = _ask(build_summary_messages(report), MAX_OUTPUT_TOKENS["summary"], model)
+    summary = summary.split("## Limits")[0].rstrip()  # limits are written by code
+    parts.insert(0, f"# Repository Summary\n\n{summary}\n\n{limits_markdown(report)}")
+    if on_progress:
+        on_progress("\n\n---\n\n".join(parts))
+
+    code_review = flag_unverified_findings(
+        _ask(build_code_review_messages(report), MAX_OUTPUT_TOKENS["code_review"], model),
+        report,
+        drop_failed=True,  # hide findings whose evidence cannot be verified
+    )
+    parts.insert(1, f"# Code Review\n\n{code_review}")
+    if on_progress:
+        on_progress("\n\n---\n\n".join(parts))
+
+    return "\n\n---\n\n".join(parts)
+
+
+def generate_repository_review_v1(report: dict) -> str:
+    """OLD version (prompt v1): one big prompt. Kept only so evaluate_prompts.py
+    can show the 'before' result next to the new one."""
 
     source_files = report.get("source_files", [])
     readme = report.get("readme") or "No README was found."
